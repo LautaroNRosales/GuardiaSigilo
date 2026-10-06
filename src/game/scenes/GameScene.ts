@@ -38,10 +38,12 @@ import { canToggleDoor, openMapCells } from "../../domain/model/doors";
 import type { Vector2 } from "../../domain/model/vector";
 import { advanceAlongPath } from "../../domain/navigation/pathFollower";
 import type { SearchAlgorithm, SearchResult, SearchStatus } from "../../domain/navigation/search";
+import { alertLevel } from "../../domain/perception/alertLevel";
 import { timeSinceLastPerception } from "../../domain/perception/memory";
 import type { VisionReason, VisionResult } from "../../domain/perception/perception";
 import { visionConeStyle } from "../presentation/visionConeStyle";
 import { alertStyle } from "../presentation/alertStyle";
+import { alertMeterStyle } from "../presentation/alertMeterStyle";
 
 const PLAYER_SPEED = 190;
 const GUARD_SPEED = 115;
@@ -105,6 +107,9 @@ export class GameScene extends Phaser.Scene {
   private previousVisionVisible = false;
   private alertTracked = false;
   private alertEnteredAtMs = 0;
+  private meterGraphics!: Phaser.GameObjects.Graphics;
+  private meterTextHud!: Phaser.GameObjects.Text;
+  private alertLevelValue = 0;
 
   public constructor() {
     super("GameScene");
@@ -129,6 +134,7 @@ export class GameScene extends Phaser.Scene {
     this.previousVisionVisible = false;
     this.alertTracked = false;
     this.alertEnteredAtMs = 0;
+    this.alertLevelValue = 0;
     this.cameras.main.setBackgroundColor("#10161c");
     this.drawGrid();
 
@@ -208,6 +214,18 @@ export class GameScene extends Phaser.Scene {
       .setDepth(10);
 
     this.alertGraphics = this.add.graphics().setDepth(9);
+
+    this.meterGraphics = this.add.graphics().setDepth(10);
+    this.meterTextHud = this.add
+      .text(GRID_WIDTH * TILE_SIZE - 16, GRID_HEIGHT * TILE_SIZE - 14, "", {
+        backgroundColor: "#10161ccc",
+        color: "#73c991",
+        fontFamily: "monospace",
+        fontSize: "13px",
+        padding: { x: 8, y: 4 },
+      })
+      .setOrigin(1, 1)
+      .setDepth(10);
 
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.resumePatrolRoute();
@@ -525,6 +543,12 @@ export class GameScene extends Phaser.Scene {
 
     this.drawPerception(frame.vision, time);
     this.drawAlert(time);
+    this.alertLevelValue = alertLevel(
+      this.perceptionState.memory,
+      frame.vision.visible,
+      time,
+    );
+    this.drawAlertMeter();
     this.updateTelemetry(time, frame.vision, frame.soundHeard);
   }
 
@@ -565,6 +589,29 @@ export class GameScene extends Phaser.Scene {
       GRID_WIDTH * TILE_SIZE - 6,
       GRID_HEIGHT * TILE_SIZE - 6,
     );
+  }
+
+  private drawAlertMeter(): void {
+    const style = alertMeterStyle(this.alertLevelValue);
+    const barWidth = 180;
+    const x = GRID_WIDTH * TILE_SIZE - 16 - barWidth;
+    const y = GRID_HEIGHT * TILE_SIZE - 56;
+
+    this.meterGraphics.clear();
+    this.meterGraphics.fillStyle(0x10161c, 0.9);
+    this.meterGraphics.fillRect(x, y, barWidth, 10);
+    this.meterGraphics.lineStyle(1, 0x35505e, 0.9);
+    this.meterGraphics.strokeRect(x, y, barWidth, 10);
+
+    const fillWidth = barWidth * this.alertLevelValue;
+    if (fillWidth > 0) {
+      this.meterGraphics.fillStyle(style.color, 1);
+      this.meterGraphics.fillRect(x, y, fillWidth, 10);
+    }
+
+    const colorHex = style.color.toString(16).padStart(6, "0");
+    this.meterTextHud.setColor(`#${colorHex}`);
+    this.meterTextHud.setText(`alerta ${this.alertLevelValue.toFixed(2)}`);
   }
 
   private coneProgress(time: number): number {
