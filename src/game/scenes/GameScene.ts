@@ -40,6 +40,7 @@ import { advanceAlongPath } from "../../domain/navigation/pathFollower";
 import type { SearchAlgorithm, SearchResult, SearchStatus } from "../../domain/navigation/search";
 import { timeSinceLastPerception } from "../../domain/perception/memory";
 import type { VisionReason, VisionResult } from "../../domain/perception/perception";
+import { visionConeStyle } from "../presentation/visionConeStyle";
 
 const PLAYER_SPEED = 190;
 const GUARD_SPEED = 115;
@@ -49,6 +50,7 @@ const SOUND_RADIUS = 190;
 const SOUND_DURATION_MS = 800;
 const PATROL_PAUSE_MS = 1200;
 const NOTICE_DURATION_MS = 2000;
+const VISION_TRANSITION_MS = 350;
 const STATUS_LABELS: Readonly<Record<SearchStatus, string>> = {
   success: "EXITO",
   unreachable: "INALCANZABLE",
@@ -95,6 +97,8 @@ export class GameScene extends Phaser.Scene {
   private doorMarkers: Phaser.GameObjects.Rectangle[] = [];
   private openDoors = new Set<string>();
   private effectiveMap: GridMap = LAB_MAP;
+  private lastVisionReason: VisionReason | null = null;
+  private reasonChangedAtMs = 0;
 
   public constructor() {
     super("GameScene");
@@ -114,6 +118,8 @@ export class GameScene extends Phaser.Scene {
     this.openDoors.clear();
     this.effectiveMap = LAB_MAP;
     this.doorMarkers = [];
+    this.lastVisionReason = null;
+    this.reasonChangedAtMs = 0;
     this.cameras.main.setBackgroundColor("#10161c");
     this.drawGrid();
 
@@ -497,15 +503,27 @@ export class GameScene extends Phaser.Scene {
     });
     this.perceptionState = frame.state;
 
-    this.drawPerception(frame.vision);
+    if (frame.vision.reason !== this.lastVisionReason) {
+      const initial = this.lastVisionReason === null;
+      this.lastVisionReason = frame.vision.reason;
+      this.reasonChangedAtMs = time - (initial ? VISION_TRANSITION_MS : 0);
+    }
+
+    this.drawPerception(frame.vision, time);
     this.updateTelemetry(time, frame.vision, frame.soundHeard);
   }
 
-  private drawPerception(vision: VisionResult): void {
+  private coneProgress(time: number): number {
+    const elapsed = time - this.reasonChangedAtMs;
+    return Math.min(1, Math.max(0, 1 - elapsed / VISION_TRANSITION_MS));
+  }
+
+  private drawPerception(vision: VisionResult, time: number): void {
     this.perceptionGraphics.clear();
+    const style = visionConeStyle(vision.reason, this.coneProgress(time));
     const facingAngle = Math.atan2(this.guardFacing.y, this.guardFacing.x);
     const halfFieldOfView = FIELD_OF_VIEW / 2;
-    this.perceptionGraphics.fillStyle(vision.visible ? 0x73c991 : 0x6b8afd, 0.16);
+    this.perceptionGraphics.fillStyle(style.fillColor, style.fillAlpha);
     this.perceptionGraphics.beginPath();
     this.perceptionGraphics.moveTo(this.guard.x, this.guard.y);
     this.perceptionGraphics.arc(
@@ -517,6 +535,17 @@ export class GameScene extends Phaser.Scene {
     );
     this.perceptionGraphics.closePath();
     this.perceptionGraphics.fillPath();
+
+    this.perceptionGraphics.lineStyle(style.strokeWidth, style.strokeColor, 1);
+    this.perceptionGraphics.beginPath();
+    this.perceptionGraphics.arc(
+      this.guard.x,
+      this.guard.y,
+      VISION_RANGE,
+      facingAngle - halfFieldOfView,
+      facingAngle + halfFieldOfView,
+    );
+    this.perceptionGraphics.strokePath();
 
     if (this.perceptionState.soundEvent) {
       this.perceptionGraphics.lineStyle(2, 0xe5b454, 0.8);
