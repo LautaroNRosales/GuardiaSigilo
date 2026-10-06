@@ -11,6 +11,10 @@ export const PATROL_POINTS: readonly GridPoint[] = [
   { x: 17, y: 2 },
   { x: 17, y: 12 },
 ];
+export const DOOR_CELLS: readonly GridPoint[] = [
+  { x: 16, y: 15 },
+  { x: 19, y: 6 },
+];
 
 interface BlockedRectangle {
   readonly x: number;

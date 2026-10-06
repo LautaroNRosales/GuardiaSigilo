@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import {
+  DOOR_CELLS,
   GUARD_START,
   GRID_HEIGHT,
   GRID_WIDTH,
@@ -25,7 +26,15 @@ import {
   tick,
   type PatrolState,
 } from "../../domain/behavior/patrol";
-import { cellCenter, isWalkable, worldToCell, type GridPoint } from "../../domain/model/grid";
+import {
+  cellCenter,
+  cellKey,
+  isWalkable,
+  worldToCell,
+  type GridMap,
+  type GridPoint,
+} from "../../domain/model/grid";
+import { canToggleDoor, openMapCells } from "../../domain/model/doors";
 import type { Vector2 } from "../../domain/model/vector";
 import { advanceAlongPath } from "../../domain/navigation/pathFollower";
 import type { SearchAlgorithm, SearchResult, SearchStatus } from "../../domain/navigation/search";
@@ -66,6 +75,7 @@ export class GameScene extends Phaser.Scene {
   private reset!: Phaser.Input.Keyboard.Key;
   private toggleAlgorithm!: Phaser.Input.Keyboard.Key;
   private emitSound!: Phaser.Input.Keyboard.Key;
+  private toggleDoor!: Phaser.Input.Keyboard.Key;
   private navigationGraphics!: Phaser.GameObjects.Graphics;
   private perceptionGraphics!: Phaser.GameObjects.Graphics;
   private targetMarker!: Phaser.GameObjects.Arc;
@@ -81,6 +91,10 @@ export class GameScene extends Phaser.Scene {
   private patrolState!: PatrolState;
   private noticeHud!: Phaser.GameObjects.Text;
   private noticeExpiresAtMs = 0;
+  private walls!: Phaser.Physics.Arcade.StaticGroup;
+  private doorMarkers: Phaser.GameObjects.Rectangle[] = [];
+  private openDoors = new Set<string>();
+  private effectiveMap: GridMap = LAB_MAP;
 
   public constructor() {
     super("GameScene");
@@ -97,20 +111,14 @@ export class GameScene extends Phaser.Scene {
       PATROL_POINTS.map((point) => cellCenter(point, TILE_SIZE)),
     );
     this.noticeExpiresAtMs = 0;
+    this.openDoors.clear();
+    this.effectiveMap = LAB_MAP;
+    this.doorMarkers = [];
     this.cameras.main.setBackgroundColor("#10161c");
     this.drawGrid();
 
-    const walls = this.physics.add.staticGroup();
-    for (let y = 0; y < GRID_HEIGHT; y += 1) {
-      for (let x = 0; x < GRID_WIDTH; x += 1) {
-        if (!isWalkable(LAB_MAP, { x, y })) {
-          const center = cellCenter({ x, y }, TILE_SIZE);
-          const wall = this.add.rectangle(center.x, center.y, TILE_SIZE, TILE_SIZE, 0x27333d);
-          wall.setStrokeStyle(1, 0x3a4c58);
-          walls.add(wall);
-        }
-      }
-    }
+    this.walls = this.physics.add.staticGroup();
+    this.rebuildWalls();
 
     const spawn = cellCenter(PLAYER_START, TILE_SIZE);
     this.player = this.add.rectangle(spawn.x, spawn.y, 20, 20, 0xe5b454);
@@ -119,7 +127,7 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.existing(this.player);
     this.playerBody = this.player.body as Phaser.Physics.Arcade.Body;
     this.playerBody.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, walls);
+    this.physics.add.collider(this.player, this.walls);
 
     const keyboard = this.input.keyboard;
     if (!keyboard) {
@@ -134,6 +142,7 @@ export class GameScene extends Phaser.Scene {
     this.reset = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.toggleAlgorithm = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.emitSound = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.toggleDoor = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
     this.perceptionGraphics = this.add.graphics().setDepth(1);
     this.navigationGraphics = this.add.graphics().setDepth(2);
@@ -208,6 +217,10 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.toggleDoor)) {
+      this.handleDoorToggle();
+    }
+
     if (this.patrolState.phase === "paused") {
       this.patrolState = tick(this.patrolState, delta);
       if (this.patrolState.phase === "travelling") {
@@ -256,6 +269,97 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private rebuildWalls(): void {
+    this.walls.clear(true, true);
+    for (const marker of this.doorMarkers) {
+      marker.destroy();
+    }
+    this.doorMarkers = [];
+
+    const doorKeys = new Set(DOOR_CELLS.map((cell) => cellKey(cell)));
+    for (let y = 0; y < GRID_HEIGHT; y += 1) {
+      for (let x = 0; x < GRID_WIDTH; x += 1) {
+        const cell = { x, y };
+        if (isWalkable(this.effectiveMap, cell)) {
+          continue;
+        }
+        const center = cellCenter(cell, TILE_SIZE);
+        const isDoor = doorKeys.has(cellKey(cell));
+        const wall = this.add.rectangle(
+          center.x,
+          center.y,
+          TILE_SIZE,
+          TILE_SIZE,
+          isDoor ? 0x6b4a2b : 0x27333d,
+        );
+        wall.setStrokeStyle(1, isDoor ? 0xc99a5a : 0x3a4c58);
+        this.walls.add(wall);
+      }
+    }
+
+    for (const door of DOOR_CELLS) {
+      if (!this.openDoors.has(cellKey(door))) {
+        continue;
+      }
+      const center = cellCenter(door, TILE_SIZE);
+      const marker = this.add
+        .rectangle(center.x, center.y, TILE_SIZE - 6, TILE_SIZE - 6, 0x000000, 0)
+        .setStrokeStyle(2, 0x73c991);
+      marker.setDepth(1);
+      this.doorMarkers.push(marker);
+    }
+  }
+
+  private handleDoorToggle(): void {
+    const playerCell = worldToCell({ x: this.player.x, y: this.player.y }, TILE_SIZE);
+    const guardCell = worldToCell({ x: this.guard.x, y: this.guard.y }, TILE_SIZE);
+    const door = DOOR_CELLS.find(
+      (cell) => Math.abs(cell.x - playerCell.x) + Math.abs(cell.y - playerCell.y) <= 1,
+    );
+    if (!door) {
+      this.showNotice("SIN PUERTA CERCA");
+      return;
+    }
+    if (!canToggleDoor(playerCell, guardCell, door)) {
+      this.showNotice("PUERTA BLOQUEADA");
+      return;
+    }
+
+    const key = cellKey(door);
+    const willOpen = !this.openDoors.has(key);
+    if (willOpen) {
+      this.openDoors.add(key);
+    } else {
+      this.openDoors.delete(key);
+    }
+    this.effectiveMap = openMapCells(
+      LAB_MAP,
+      DOOR_CELLS.filter((cell) => this.openDoors.has(cellKey(cell))),
+    );
+    this.rebuildWalls();
+    this.showNotice(willOpen ? "PUERTA ABIERTA" : "PUERTA CERRADA");
+    this.replanAfterDoorChange();
+  }
+
+  private replanAfterDoorChange(): void {
+    if (this.patrolState.phase === "paused") {
+      return;
+    }
+
+    if (this.patrolState.mode === "manual") {
+      const result = this.computeRoute(this.navigationGoal);
+      if (result.status !== "success") {
+        this.showNotice("RUTA CORTADA, PATRULLA REANUDADA");
+        this.resumePatrolRoute();
+        return;
+      }
+      this.applyRoute(this.navigationGoal, result);
+      return;
+    }
+
+    this.resumePatrolRoute();
+  }
+
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
     const goalCell = worldToCell({ x: pointer.worldX, y: pointer.worldY }, TILE_SIZE);
     const result = this.computeRoute(goalCell);
@@ -273,7 +377,7 @@ export class GameScene extends Phaser.Scene {
 
   private computeRoute(goalCell: GridPoint): SearchResult {
     const guardCell = worldToCell({ x: this.guard.x, y: this.guard.y }, TILE_SIZE);
-    return calculateRoute(LAB_MAP, guardCell, goalCell, this.navigationAlgorithm);
+    return calculateRoute(this.effectiveMap, guardCell, goalCell, this.navigationAlgorithm);
   }
 
   private applyRoute(goalCell: GridPoint, result: SearchResult): void {
@@ -382,7 +486,7 @@ export class GameScene extends Phaser.Scene {
     const observer = { x: this.guard.x, y: this.guard.y };
     const target = { x: this.player.x, y: this.player.y };
     const frame = updatePerceptionSimulation(this.perceptionState, {
-      map: LAB_MAP,
+      map: this.effectiveMap,
       tileSize: TILE_SIZE,
       observer,
       facing: this.guardFacing,
