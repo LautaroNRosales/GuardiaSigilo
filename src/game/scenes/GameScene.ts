@@ -41,6 +41,7 @@ import type { SearchAlgorithm, SearchResult, SearchStatus } from "../../domain/n
 import { timeSinceLastPerception } from "../../domain/perception/memory";
 import type { VisionReason, VisionResult } from "../../domain/perception/perception";
 import { visionConeStyle } from "../presentation/visionConeStyle";
+import { alertStyle } from "../presentation/alertStyle";
 
 const PLAYER_SPEED = 190;
 const GUARD_SPEED = 115;
@@ -51,6 +52,7 @@ const SOUND_DURATION_MS = 800;
 const PATROL_PAUSE_MS = 1200;
 const NOTICE_DURATION_MS = 2000;
 const VISION_TRANSITION_MS = 350;
+const ALERT_FLASH_MS = 600;
 const STATUS_LABELS: Readonly<Record<SearchStatus, string>> = {
   success: "EXITO",
   unreachable: "INALCANZABLE",
@@ -99,6 +101,10 @@ export class GameScene extends Phaser.Scene {
   private effectiveMap: GridMap = LAB_MAP;
   private lastVisionReason: VisionReason | null = null;
   private reasonChangedAtMs = 0;
+  private alertGraphics!: Phaser.GameObjects.Graphics;
+  private previousVisionVisible = false;
+  private alertTracked = false;
+  private alertEnteredAtMs = 0;
 
   public constructor() {
     super("GameScene");
@@ -120,6 +126,9 @@ export class GameScene extends Phaser.Scene {
     this.doorMarkers = [];
     this.lastVisionReason = null;
     this.reasonChangedAtMs = 0;
+    this.previousVisionVisible = false;
+    this.alertTracked = false;
+    this.alertEnteredAtMs = 0;
     this.cameras.main.setBackgroundColor("#10161c");
     this.drawGrid();
 
@@ -197,6 +206,8 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0, 1)
       .setDepth(10);
+
+    this.alertGraphics = this.add.graphics().setDepth(9);
 
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.resumePatrolRoute();
@@ -423,7 +434,8 @@ export class GameScene extends Phaser.Scene {
     this.planPatrolLeg();
   }
 
-  private showNotice(message: string): void {
+  private showNotice(message: string, color = "#f0c674"): void {
+    this.noticeHud.setColor(color);
     this.noticeHud.setText(message);
     this.noticeExpiresAtMs = this.time.now + NOTICE_DURATION_MS;
   }
@@ -509,8 +521,50 @@ export class GameScene extends Phaser.Scene {
       this.reasonChangedAtMs = time - (initial ? VISION_TRANSITION_MS : 0);
     }
 
+    this.trackAlertEdge(frame.vision.visible, time);
+
     this.drawPerception(frame.vision, time);
+    this.drawAlert(time);
     this.updateTelemetry(time, frame.vision, frame.soundHeard);
+  }
+
+  private trackAlertEdge(visible: boolean, time: number): void {
+    if (!this.alertTracked) {
+      this.alertTracked = true;
+      this.previousVisionVisible = visible;
+      if (visible) {
+        this.alertEnteredAtMs = time - ALERT_FLASH_MS;
+      }
+      return;
+    }
+    if (visible === this.previousVisionVisible) {
+      return;
+    }
+    this.previousVisionVisible = visible;
+    if (visible) {
+      this.alertEnteredAtMs = time;
+      this.showNotice("¡ALERTA!", "#ff6b6b");
+    }
+  }
+
+  private alertFlashProgress(time: number): number {
+    const elapsed = time - this.alertEnteredAtMs;
+    return Math.min(1, Math.max(0, 1 - elapsed / ALERT_FLASH_MS));
+  }
+
+  private drawAlert(time: number): void {
+    const style = alertStyle(this.previousVisionVisible, this.alertFlashProgress(time));
+    this.alertGraphics.clear();
+    if (style.borderAlpha <= 0) {
+      return;
+    }
+    this.alertGraphics.lineStyle(style.borderWidth, style.borderColor, style.borderAlpha);
+    this.alertGraphics.strokeRect(
+      3,
+      3,
+      GRID_WIDTH * TILE_SIZE - 6,
+      GRID_HEIGHT * TILE_SIZE - 6,
+    );
   }
 
   private coneProgress(time: number): number {

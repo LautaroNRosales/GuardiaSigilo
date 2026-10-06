@@ -41,7 +41,7 @@ export function visionConeStyle(reason: VisionReason, progress: number): VisionC
 }
 
 function clampProgress(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) {
+  if (Number.isNaN(value) || value <= 0) {
     return 0;
   }
   if (value >= 1) {

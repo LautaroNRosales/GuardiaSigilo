@@ -42,6 +42,9 @@ describe("vision cone style", () => {
     expect(visionConeStyle("visible", 5)).toEqual(visionConeStyle("visible", 1));
     expect(visionConeStyle("visible", -2)).toEqual(visionConeStyle("visible", 0));
     expect(visionConeStyle("visible", Number.NaN)).toEqual(visionConeStyle("visible", 0));
+    expect(visionConeStyle("visible", Number.POSITIVE_INFINITY)).toEqual(
+      visionConeStyle("visible", 1),
+    );
   });
 
   it("rejects unknown reasons instead of failing silently", () => {
