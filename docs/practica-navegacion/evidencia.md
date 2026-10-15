@@ -2,7 +2,7 @@
 
 Repositorio: https://github.com/LautaroNRosales/GuardiaSigilo.git
 Commit inicial: 50465b4f5ba376ef9ed88692c2aef87b229f2768
-Commit de implementación: cambios validados en working tree; commit final pendiente de autorización humana
+Commit de implementación: 601d8a0 (incluye código, pruebas, spec.md, plan.md y evidencia.md)
 Versión de entrega: commit final informado por el estudiante en la plataforma
 Variante: A
 Herramienta/modelo o trabajo manual: OpenCode; decisiones humanas en cada gate
@@ -43,7 +43,7 @@ Caso normal: franja lenta en (1,1),(2,1),(3,1) con costo 5; A* ponderado devuelv
 | A-AC2 | tests/navigation/terrainCost.test.ts | sin franja: 4 pasos/costo 4 | Cumple |
 | A-AC3 | tests/application/navigationDemo.test.ts | consumidor obtiene costo 6 con franja y costo 4 sin franja | Cumple |
 | BASE-AC5 | npm run validate; revisión del diff | 100/100 pruebas, build OK, sin cambios fuera del alcance | Cumple |
-| BASE-AC6 | URL, docs/practica-navegacion/, commit inicial/pending | tres documentos presentes; commit final pendiente de autorización humana | Pendiente de commit final |
+| BASE-AC6 | URL, docs/practica-navegacion/, commit 601d8a0 | tres documentos presentes en el commit de implementación | Cumple |
 
 ## Registro mínimo de intervención
 Prompts: Pasos 1 a 8 de la guía, variante A, con adaptación a rutas reales del repositorio.
