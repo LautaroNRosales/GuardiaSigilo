@@ -88,6 +88,7 @@ export class GameScene extends Phaser.Scene {
   private lastKnownMarker!: Phaser.GameObjects.Arc;
   private navigationHud!: Phaser.GameObjects.Text;
   private navigationAlgorithm: SearchAlgorithm = "astar";
+  private navigationEntryCost: (point: GridPoint) => number = () => 1;
   private navigationGoal: GridPoint = GUARD_START;
   private navigationSummary: readonly string[] = [];
   private guardFacing: Vector2 = { x: -1, y: 0 };
@@ -412,7 +413,7 @@ export class GameScene extends Phaser.Scene {
 
   private computeRoute(goalCell: GridPoint): SearchResult {
     const guardCell = worldToCell({ x: this.guard.x, y: this.guard.y }, TILE_SIZE);
-    return calculateRoute(this.effectiveMap, guardCell, goalCell, this.navigationAlgorithm);
+    return calculateRoute(this.effectiveMap, guardCell, goalCell, this.navigationAlgorithm, this.navigationEntryCost);
   }
 
   private applyRoute(goalCell: GridPoint, result: SearchResult): void {

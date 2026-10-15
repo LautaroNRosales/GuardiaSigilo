@@ -61,7 +61,18 @@ export function findPathBfs(map: GridMap, start: GridPoint, goal: GridPoint): Se
   return failureResult("bfs", "unreachable", explored, maximumFrontier);
 }
 
-export function findPathAStar(map: GridMap, start: GridPoint, goal: GridPoint): SearchResult {
+export type EntryCost = (point: GridPoint) => number;
+
+export function defaultEntryCost(_point: GridPoint): number {
+  return 1;
+}
+
+export function findPathAStar(
+  map: GridMap,
+  start: GridPoint,
+  goal: GridPoint,
+  entryCost: EntryCost = defaultEntryCost,
+): SearchResult {
   const invalid = validateEndpoints("astar", map, start, goal);
   if (invalid) {
     return invalid;
@@ -89,7 +100,7 @@ export function findPathAStar(map: GridMap, start: GridPoint, goal: GridPoint): 
     explored.push(current.point);
 
     if (samePoint(current.point, goal)) {
-      return successResult("astar", start, goal, parents, explored, maximumFrontier);
+      return successResult("astar", start, goal, parents, explored, maximumFrontier, current.cost);
     }
 
     for (const neighbor of walkableNeighbors(map, current.point)) {
@@ -98,7 +109,11 @@ export function findPathAStar(map: GridMap, start: GridPoint, goal: GridPoint): 
         continue;
       }
 
-      const candidateCost = current.cost + 1;
+      const stepCost = entryCost(neighbor);
+      if (!Number.isFinite(stepCost) || stepCost < 1) {
+        throw new Error("Entry cost must be finite and at least 1.");
+      }
+      const candidateCost = current.cost + stepCost;
       const knownCost = bestCosts.get(neighborKey);
       if (knownCost === undefined || candidateCost < knownCost) {
         insertionOrder += 1;
@@ -136,7 +151,6 @@ function validateEndpoints(
 
 function lowestPriorityNode(frontier: ReadonlyMap<string, AStarNode>): AStarNode {
   let selected: AStarNode | undefined;
-
   for (const candidate of frontier.values()) {
     const candidateScore = candidate.cost + candidate.heuristic;
     const selectedScore = selected ? selected.cost + selected.heuristic : Number.POSITIVE_INFINITY;
@@ -167,13 +181,14 @@ function successResult(
   parents: ReadonlyMap<string, GridPoint>,
   explored: readonly GridPoint[],
   maximumFrontier: number,
+  totalCost?: number,
 ): SearchResult {
   const path = reconstructPath(start, goal, parents);
   return {
     algorithm,
     status: "success",
     path,
-    totalCost: path.length - 1,
+    totalCost: totalCost ?? path.length - 1,
     expandedNodes: explored.length,
     maximumFrontier,
     explored,
@@ -204,7 +219,6 @@ function reconstructPath(
 ): GridPoint[] {
   const path: GridPoint[] = [goal];
   let current = goal;
-
   while (!samePoint(current, start)) {
     const parent = parents.get(cellKey(current));
     if (!parent) {
@@ -213,7 +227,6 @@ function reconstructPath(
     path.push(parent);
     current = parent;
   }
-
   return path.reverse();
 }
 
